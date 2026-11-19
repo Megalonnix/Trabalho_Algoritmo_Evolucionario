@@ -4,8 +4,8 @@
 
 A versão no navegador é uma demonstração para a apresentação: ela mostra a
 população, o cenário, as gerações, a evolução do fitness e permite executar um
-campeão. Mesmo sem Web Worker, treinar muitas gerações no navegador pode ser
-lento e afetar a responsividade da página.
+campeão. Treinar muitas gerações no navegador pode ser lento e afetar a
+responsividade da página.
 
 `treinar.cpp` executa o mesmo algoritmo genético offline, sem interface
 gráfica, e grava o melhor genoma em `campeao.json`. Esse arquivo pode ser
@@ -99,8 +99,10 @@ O terminal mostra a evolução, o pior resultado entre os cenários de treino e 
 melhor mínimo obtido na validação. O programa cria ou substitui
 `campeao.json` nesta pasta. Código de saída `0` significa que o campeão
 alcançou 100 canos nos 20 cenários de validação; código `2` significa que a
-meta ainda não foi alcançada. Nesse caso, o JSON informa o melhor resultado
-medido, sem declarar sucesso.
+meta ainda não foi alcançada (nesse caso, o JSON informa o melhor resultado
+medido, sem declarar sucesso); código `1` significa erro de execução (por
+exemplo, falha ao criar/gravar `campeao.json` ou nenhum candidato avaliado),
+com a mensagem de erro impressa em `stderr`.
 
 ## Como executar o campeão no navegador
 
