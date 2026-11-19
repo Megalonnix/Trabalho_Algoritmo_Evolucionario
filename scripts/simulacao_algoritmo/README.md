@@ -48,8 +48,6 @@ precisar mudar uma fórmula do GA, mexe em `evolution.js`. Se precisar mudar a
 gravidade, mexe em `config.js`. Se precisar mudar a cor do pássaro, mexe em
 `style.css`. Nada fica espalhado.
 
----
-
 ## 3. Responsabilidade de cada arquivo (em detalhe)
 
 ### 3.1 `index.html` — estrutura da página
@@ -124,6 +122,8 @@ um experimento viraria caça ao tesouro. Aqui está tudo junto e comentado.
   normalizadas: altura, velocidade vertical, tempo assinado até o cano,
   altura do vão e posição vertical relativa ao centro do vão. Em seguida,
   calcula `z`, aplica sigmoide e compara com 0.5.
+- `limitar(valor, minimo, maximo)` — utilitário de clipping usado pelas
+  entradas normalizadas.
 
 **O que NÃO faz:** não move o pássaro, não gera canos, não calcula fitness. Só
 **decide**.
@@ -138,19 +138,29 @@ um experimento viraria caça ao tesouro. Aqui está tudo junto e comentado.
 **O que é:** o módulo que simula **a física e o ambiente** do jogo.
 
 **O que faz:**
-- Define a classe `Passaro`: posição (`y`), velocidade (`vy`), genoma, fitness,
-  estado vivo/morto. Métodos `aplicarGravidade()`, `pular()`, `mover()`,
-  `colidiuComTetoOuChao()`, `resetar()`.
-- Define a classe `Cano`: posição (`x`), vão (`yVaoSup`, `yVaoInf`).
-  Métodos `mover()`, `saiuDaTela()`.
-- Define a função `criarCano()`, `verificarColisaoComCano(passaro, cano)`.
-- Define a função `atualizarFitness(passaro)` — soma canos ultrapassados e
-  distância percorrida.
+- Define a classe `Passaro`: posição (`x`, `y`), velocidade (`vy`), genoma,
+  contadores (`canosUltrapassados`, `ultimoCanoContado`, `distanciaPercorrida`),
+  estado `vivo` e `fitness`. Métodos:
+  - `aplicarFisica(pulou)` — aplica gravidade, sobrescreve `vy` se pulou,
+    atualiza `y` e incrementa `distanciaPercorrida`.
+  - `colidiuComTetoOuChao()` — retorna `true` se saiu pelos limites superior
+    ou inferior.
+  - `atualizarFitness()` — recalcula `fitness = FITNESS_PESO_CANOS * canos +
+    distanciaPercorrida`.
+- Define a classe `Cano`: posição (`x`), centro do vão (`yVao`) e limites
+  (`yVaoSup`, `yVaoInf`), flag `passou`. Métodos `mover()` e `saiuDaTela()`.
+- Define as funções auxiliares:
+  - `criarCanoAleatorio(x)` — cria um cano com vão sorteado, respeitando as
+    margens.
+  - `colidiuComCano(passaro, cano)` — teste de sobreposição retangular com o
+    vão.
+  - `verificarPassouCano(passaro, cano)` — marca `cano.passou = true` e
+    devolve `true` quando a borda direita do cano cruzou o pássaro.
 
 **O que NÃO faz:** não decide se o pássaro pula (isso é `brain.js`), não
-seleciona pais (isso é `evolution.js`), não desenha (isso é `main.js`).
+seleciona pais (isso é `evolution.js`), não desenha (isso é `ui.js`).
 
-**Quem depende dele:** `main.js` (chama a física a cada frame).
+**Quem depende dele:** `main.js` (chama a física e as colisões a cada frame).
 
 ---
 
@@ -159,17 +169,21 @@ seleciona pais (isso é `evolution.js`), não desenha (isso é `main.js`).
 **O que é:** o módulo que executa **uma geração inteira** do GA.
 
 **O que faz:**
-- `avaliarPopulacao(populacao)` — pega os genomas vivos/mortos e calcula
-  fitness final.
-- `ordenarPorFitness(populacao)` — ordena decrescente.
-- `torneio(populacaoOrdenada, k)` — escolhe um pai por torneio.
-- `cruzarUniforme(paiA, paiB)` — cruzamento uniforme (seção F.2).
-- `mutar(filho, pm, sigma)` — mutação gaussiana + clipping (seções G.2 e G.3).
+- `ordenarPorFitness(populacao)` — devolve uma **nova** array ordenada por
+  fitness decrescente (não modifica a original).
+- `torneio(populacaoOrdenada, k)` — sorteia `k` indivíduos e devolve o de
+  maior fitness.
+- `cruzarUniforme(paiA, paiB)` — cruzamento uniforme, gene a gene (seção F.2).
+- `mutar(genoma, pm, sigma)` — mutação gaussiana (via Box-Muller) por gene +
+  clipping em `[-LIMITE_GENE, +LIMITE_GENE]` (seções G.2 e G.3). Modifica o
+  genoma in-place e devolve o mesmo vetor.
 - `construirNovaGeracao(populacaoAtual)` — copia os `E` elites, gera filhos
-  até preencher `N`, devolve a nova população.
+  (torneio → cruzamento opcional com `pc` → mutação) até preencher `N`, e
+  devolve a nova população como array de genomas.
 
-**O que NÃO faz:** não simula física, não desenha, não decide pulo individual.
-Só aplica o GA **sobre os genomas**.
+**O que NÃO faz:** não simula física, não desenha, não decide pulo individual
+e **não calcula fitness da população** — a avaliação e o cálculo de fitness
+vivem no `main.js`. Só aplica o GA **sobre os genomas**.
 
 **Quem depende dele:** `main.js` (chama `construirNovaGeracao` ao fim de cada
 geração).
@@ -181,14 +195,24 @@ geração).
 **O que é:** o módulo que cuida de **tudo que o usuário vê** além do jogo.
 
 **O que faz:**
-- `atualizarPainel(estado)` — escreve no HTML a geração atual, melhor fitness,
-  fitness média, número de vivos, etc.
-- `desenharGrafico(historico)` — desenha no segundo canvas a curva de melhor
-  fitness e fitness média ao longo das gerações.
-- `exportarCSV(historico)` — gera um arquivo `.csv` com uma linha por geração
-  (melhor indivíduo, fitness média e genoma campeão) e dispara o download.
-- `desenharCenario(ctx, passaros, canos)` — desenha o fundo, os canos e os
-  pássaros no canvas principal.
+- `desenharCenario(passaros, canos, sobreporPopulacao = false)` — desenha o
+  fundo, os canos, os pássaros (mortos em cinza translúcido, vivos em amarelo)
+  e o chão no canvas principal. O terceiro parâmetro controla a opacidade
+  quando vários pássaros compartilham o mesmo cenário.
+- `desenharPassaro(passaro, morto, opacidade)` — desenha um único pássaro com
+  a cor/opacidade apropriadas.
+- `atualizarPainel(info)` — escreve no HTML os campos do painel (modo,
+  geração, cenário, vivos, melhor fitness, fitness média, melhor canos,
+  status). Marca o status em vermelho quando começa com `PARADO`.
+- `desenharGrafico(historico)` — desenha no segundo canvas as curvas de melhor
+  fitness (verde) e fitness média (azul) ao longo das gerações, com
+  downsampling quando há muitas gerações.
+- `exportarCSV(historicoResumo)` — gera um `.csv` com uma linha por geração
+  (melhor fitness, média, canos e genoma do campeão daquela geração) e
+  dispara o download como `resultados.csv`.
+- `destacarBotaoVelocidade(valor)`, `setBotaoDemoHabilitado(...)` e
+  `setBotaoPararDemoHabilitado(...)` — utilitários de estado visual dos
+  botões.
 
 **O que NÃO faz:** não calcula física, não decide pulos, não aplica GA.
 
@@ -225,6 +249,7 @@ geração).
 
 ---
 
+
 ## 4. Como executar
 
 1. Abra `index.html` no Chrome, Firefox ou Edge. Como não há mais Web Worker,
@@ -252,57 +277,27 @@ Não precisa de servidor, `npm`, `pip`, nem nada. Funciona offline.
 
 ---
 
-## 5. Como acompanhar a evolução
+## Como carregar o campeão na demonstração
 
-Ao rodar o `index.html`, você verá três regiões na tela:
+Esta demo JS **não treina** o campeão usado na apresentação — ela apenas
+executa o genoma exportado pelo treinador C++. Para treinar o campeão de
+verdade (com sementes fixas e validação independente em 20 cenários), siga o
+roteiro em [`treino_cpp/README.md`](treino_cpp/README.md). O resultado é o
+arquivo `treino_cpp/campeao.json`.
 
-- **Canvas grande (esquerda):** todos os pássaros da população são desenhados
-  com transparência no mesmo cenário e seguem a mesma sequência de canos.
-  Pássaros cinza já morreram naquele cenário; a população reinicia junta no
-  próximo. Isso torna visível a comparação entre genomas sob as mesmas
-  condições.
-- **Painel (direita superior):** geração atual, melhor fitness global,
-  cenário atual de treino, número de pássaros vivos e canos do melhor pássaro.
-  Uma geração só termina depois que a população conclui os 32 cenários; por
-  isso, o número da geração pode ficar igual enquanto o cenário avança.
-- **Canvas do gráfico (direita inferior):** curva de convergência — a linha
-  verde é o melhor fitness por geração, a azul é a média.
+Com o `campeao.json` já gerado:
 
-O tempo de convergência depende dos números aleatórios e do navegador. A
-demonstração avalia 32 cenários comuns, mas não executa a validação de 20
-cenários do C++; use o programa C++ para treinar e confirmar a meta de 100
-canos.
+1. Abra `index.html` no navegador (ou use o servidor local descrito na seção
+   4 acima).
+2. Clique em **Carregar campeão** e selecione
+   `treino_cpp\campeao.json`.
+3. Clique em **Rodar campeão**. O pássaro treinado é executado no jogo; após
+   morrer, a demo reinicia o mesmo genoma automaticamente.
 
-## Roteiro para treinar em C++ e apresentar o campeão
-
-1. Abra um PowerShell na raiz do repositório e entre na pasta do treinador:
-
-   ```powershell
-   Set-Location scripts\simulacao_algoritmo\treino_cpp
-   ```
-
-2. Compile o fonte com GCC/MinGW e execute o treinamento:
-
-   ```powershell
-   g++ -O2 -std=c++17 treinar.cpp -o treinar.exe
-   .\treinar.exe
-   ```
-
-   O processo roda offline no terminal e cria ou substitui
-   `campeao.json`. Para confirmar que o campeão atingiu a meta, confira se o
-   terminal informa **META ATINGIDA**; caso contrário, ele é apenas o melhor
-   resultado encontrado, sem aprovação nos 20 cenários de validação.
-
-3. Abra `index.html` no navegador. Clique em **Carregar campeão**, selecione
-   `treino_cpp\campeao.json` e clique em **Rodar campeão**. O navegador roda o
-   genoma do arquivo; não é necessário treinar de novo no browser.
-
-Na palestra, deixe a simulação visual da população como ilustração e use
-**Rodar campeão** para mostrar o indivíduo treinado. A versão JS não importa o
-histórico/população produzidos pelo C++; apenas executa o genoma campeão
-exportado.
-
----
+A demo JS não importa o histórico nem a população produzidos pelo C++; ela
+apenas lê o vetor de seis genes do JSON e o executa. Na palestra, use a
+evolução da população apenas como ilustração visual do algoritmo — o pássaro
+apresentado como "campeão" é o que veio do treinador C++.
 
 ## 6. Como ajustar parâmetros
 
@@ -368,16 +363,16 @@ O projeto segue **exatamente** o notebook `FASE0_MATEMATICA.ipynb`. Mapa:
 | B.3 Soma ponderada $z$ | `brain.js` → `decidir()` |
 | B.4 Sigmoide | `brain.js` → `sigmoide()` |
 | B.5 Regra de decisão | `brain.js` → `decidir()` |
-| C.2 Física | `game.js` → `Passaro.aplicarGravidade`, `Passaro.pular` |
-| C.3 Colisão | `game.js` → `verificarColisao` |
-| D.2 Fitness | `game.js` → `atualizarFitness()` |
+| C.2 Física | `game.js` → `Passaro.aplicarFisica()` |
+| C.3 Colisão | `game.js` → `colidiuComCano()` e `Passaro.colidiuComTetoOuChao()` |
+| D.2 Fitness | `game.js` → `Passaro.atualizarFitness()` |
 | E.2 Elitismo | `evolution.js` → `construirNovaGeracao()` |
 | E.3 Torneio | `evolution.js` → `torneio()` |
 | F.2 Cruzamento uniforme | `evolution.js` → `cruzarUniforme()` |
 | G.2 Mutação gaussiana | `evolution.js` → `mutar()` |
 | G.3 Clipping | `evolution.js` → `mutar()` |
 | H.1 Montagem de geração | `evolution.js` → `construirNovaGeracao()` |
-| H.3 Critérios de parada | `main.js` → `verificarParada()` |
+| H.3 Critérios de parada | `main.js` → `finalizarGeracao()` (bloco de verificação de parada, inline) |
 
 Se durante a arguição o professor perguntar "onde está a fórmula X?", você vai
 direto nessa tabela. Os valores de treinamento em `config.js` são sincronizados
